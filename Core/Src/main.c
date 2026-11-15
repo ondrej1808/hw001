@@ -3,6 +3,7 @@
 #include "morse.h"
 #include "button.h"
 #include "seg7.h"
+#include "uart.h"
 
 #define DISPLAY_TASK_PERIOD_MS 2U   /* 1 cislice / 2 ms -> 4 cislice = 125 Hz */
 
@@ -49,7 +50,8 @@ static void show_mode(void)
 
 /**
  * @brief  Vstupni bod: inicializace, SysTick 1 ms a hlavni smycka spoustejici ulohy podle flagu.
- *         SW1 (PA0) prepina morse.tone, displej ukazuje rezim.
+ *         SW1 (PA0) prepina morse.tone, displej ukazuje rezim,
+ *         znaky z UART (USB VCP, 115200) jdou do bufferu Morse koderu.
  * @param  None.
  * @return Nikdy se nevraci.
  */
@@ -59,6 +61,7 @@ int main(void)
     morse_init();
     button_init();
     init_seg7();
+    uartInit();
     show_mode();
     SysTick_Config(SystemCoreClock / 1000U);   /* az po init: task_cnt je nastaveny */
 
@@ -77,6 +80,13 @@ int main(void)
                 morse.tone = !morse.tone;
                 show_mode();
             }
+        }
+        if (run_rx_uart)
+        {
+            run_rx_uart = false;
+            char c = uart_rx_char;
+            /* echo do terminalu; '!' = znak nepridan (plny buffer / nepodporovany) */
+            uart_putc(morse_put(c) ? c : '!');
         }
         if (display_run)
         {

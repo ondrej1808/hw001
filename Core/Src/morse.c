@@ -202,7 +202,6 @@ void morse_init(void)
   buf_head             = 0;
   buf_tail             = 0;
 
-  morse_puts("SOS SOS SOS SOS SOS SOS");   /* testovaci zprava, odvysila se jednou */
 }
 
 /**
