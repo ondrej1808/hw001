@@ -92,7 +92,7 @@ int main(void)
             run_rx_uart = false;
             char c = uart_rx_char;
             /* echo do terminalu; '!' = znak nepridan (plny buffer / nepodporovany) */
-            uart_putc(morse_put(c) ? c : '!');
+            uart_send(morse_put(c) ? c : '!');
         }
         if (demorse_run)
         {
@@ -100,9 +100,11 @@ int main(void)
             char d = demorse_task();      /* dekoder PB7 */
             if (d)
             {
-                demorse_last = d;         /* zatim bez vystupu na UART */
+                demorse_last = d;
+                uart_send(d);             /* dekodovany znak do terminalu */
             }
         }
+        uart_tx_task();                   /* odesli 1 znak z TX bufferu, je-li volno */
         if (display_run)
         {
             display_run = false;

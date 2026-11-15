@@ -47,6 +47,57 @@ void uart_putc(char c)
   USART2->DR = (uint8_t)c;
 }
 
+/* Kruhovy odesilaci buffer, jedno misto zustava volne (plny / prazdny) */
+static char     tx_buf[UART_TX_BUF_SIZE + 1U];
+static uint32_t tx_head;   /* sem zapisuje uart_send */
+static uint32_t tx_tail;   /* odsud cte uart_tx_task */
+
+/**
+ * @brief  Vlozi znak do odesilaciho bufferu (neblokujici).
+ * @param  c  Znak k odeslani.
+ * @return 1 = vlozeno, 0 = buffer plny (znak se zahodi).
+ */
+uint32_t uart_send(char c)
+{
+  uint32_t next = (tx_head + 1U) % (UART_TX_BUF_SIZE + 1U);
+  if (next == tx_tail)
+  {
+    return 0;
+  }
+  tx_buf[tx_head] = c;
+  tx_head = next;
+  return 1;
+}
+
+/**
+ * @brief  Vlozi retezec do odesilaciho bufferu.
+ * @param  s  Retezec zakonceny nulou.
+ * @return Pocet vlozenych znaku.
+ */
+uint32_t uart_send_str(const char *s)
+{
+  uint32_t n = 0;
+  while (*s)
+  {
+    n += uart_send(*s++);
+  }
+  return n;
+}
+
+/**
+ * @brief  TX uloha: je-li TX registr volny a buffer neprazdny, odesle jeden znak.
+ * @param  None.
+ * @return Nic. Neblokuje - volat v kazdem pruchodu hlavni smycky.
+ */
+void uart_tx_task(void)
+{
+  if ((tx_tail != tx_head) && (USART2->SR & USART_SR_TXE))
+  {
+    USART2->DR = (uint8_t)tx_buf[tx_tail];
+    tx_tail = (tx_tail + 1U) % (UART_TX_BUF_SIZE + 1U);
+  }
+}
+
 /**
  * @brief  Preruseni USART2: pri prijmu ulozi znak a nastavi flag run_rx_uart.
  * @param  None.
