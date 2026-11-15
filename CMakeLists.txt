@@ -13,6 +13,7 @@ add_executable(${PROJECT_NAME}
     Core/Src/morse.c
     Core/Src/button.c
     Core/Src/uart.c
+    Core/Src/demorse.c
     Core/Src/system_stm32f4xx.c
     Core/Src/startup_stm32f401xe.s
 )
