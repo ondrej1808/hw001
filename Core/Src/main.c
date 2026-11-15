@@ -4,20 +4,25 @@
 #include "button.h"
 #include "seg7.h"
 #include "uart.h"
+#include "demorse.h"
 
 #define DISPLAY_TASK_PERIOD_MS 2U   /* 1 cislice / 2 ms -> 4 cislice = 125 Hz */
 
 static volatile bool morse_run;     /* flagy: nastavuje SysTick, maze main */
 static volatile bool button_run;
 static volatile bool display_run;
+static volatile bool demorse_run;
+volatile char demorse_last;          /* posledni dekodovany znak (sleduj v debuggeru) */
 
 /**
  * @brief  SysTick (1 ms): planovac uloh, po uplynuti periody kazde ulohy nastavi jeji flag.
  * @param  None.
- * @return Nic. Side effect: nastavuje morse_run, button_run, display_run.
+ * @return Nic. Side effect: nastavuje morse_run, button_run, display_run, demorse_run.
  */
 void SysTick_Handler(void)
 {
+    demorse_run = true;   /* dekoder bezi kazdou 1 ms */
+
     static uint32_t button_cnt  = BUTTON_TASK_PERIOD_MS;
     static uint32_t display_cnt = DISPLAY_TASK_PERIOD_MS;
 
@@ -62,6 +67,7 @@ int main(void)
     button_init();
     init_seg7();
     uartInit();
+    demorse_init();
     show_mode();
     SysTick_Config(SystemCoreClock / 1000U);   /* az po init: task_cnt je nastaveny */
 
@@ -87,6 +93,15 @@ int main(void)
             char c = uart_rx_char;
             /* echo do terminalu; '!' = znak nepridan (plny buffer / nepodporovany) */
             uart_putc(morse_put(c) ? c : '!');
+        }
+        if (demorse_run)
+        {
+            demorse_run = false;
+            char d = demorse_task();      /* dekoder PB7 */
+            if (d)
+            {
+                demorse_last = d;         /* zatim bez vystupu na UART */
+            }
         }
         if (display_run)
         {
