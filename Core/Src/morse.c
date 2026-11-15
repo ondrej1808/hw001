@@ -47,18 +47,88 @@ const uint32_t morse_code[] =
   ['Z'] = 0b10101110111, /* zpi-va-me-si */
 };
 
-static uint32_t idx = 0;
-static const uint32_t msg[] =
-{
-  morse_code['A'], morse_code['M'], morse_code['P']
-};
-
-
 morseTask_t morse; /* Definice zde */
 
-#define MSG_LEN        (sizeof(msg) / sizeof(msg[0]))
 #define GAP_CHAR_UNITS 3U   /* mezera mezi znaky */
-#define GAP_WORD_UNITS 7U   /* mezera mezi slovy (po konci zpravy) */
+#define GAP_WORD_UNITS 7U   /* mezera mezi slovy */
+
+/* Kruhovy buffer znaku k odvysilani (FIFO). Jedno misto zustava volne,
+ * aby slo rozlisit plny / prazdny -> kapacita MORSE_BUF_SIZE znaku. */
+static char     morse_buf[MORSE_BUF_SIZE + 1];
+static volatile uint32_t buf_head;   /* sem se zapisuje (morse_put) */
+static volatile uint32_t buf_tail;   /* odsud se cte (morse_task) */
+
+/**
+ * @brief  Vlozi znak do bufferu koderu.
+ * @param  c  Znak: A-Z, a-z (prevede se na velka), mezera = mezera mezi slovy.
+ *            Ostatni znaky se zahodi.
+ * @return 1 = vlozeno, 0 = buffer plny nebo nepodporovany znak.
+ */
+uint32_t morse_put(char c)
+{
+  if (c >= 'a' && c <= 'z')
+  {
+    c = (char)(c - 'a' + 'A');
+  }
+  if (!((c >= 'A' && c <= 'Z') || c == ' '))
+  {
+    return 0;
+  }
+
+  uint32_t next = (buf_head + 1U) % (MORSE_BUF_SIZE + 1U);
+  if (next == buf_tail)
+  {
+    return 0;                       /* plny */
+  }
+  morse_buf[buf_head] = c;
+  buf_head = next;
+  return 1;
+}
+
+/**
+ * @brief  Vlozi retezec do bufferu koderu (po znacich pres morse_put).
+ * @param  s  Retezec zakonceny nulou.
+ * @return Pocet skutecne vlozenych znaku.
+ */
+uint32_t morse_puts(const char *s)
+{
+  uint32_t n = 0;
+  while (*s)
+  {
+    n += morse_put(*s++);
+  }
+  return n;
+}
+
+/**
+ * @brief  Vybere dalsi znak z bufferu a pripravi stav FSM.
+ * @param  None.
+ * @return Nic. Side effect: pismeno -> msChar s current_symbol;
+ *         mezera -> msNextChar s cekanim do celkem 7 jednotek; prazdny buffer -> msIdle.
+ */
+static void morse_load_next(void)
+{
+  if (buf_tail == buf_head)
+  {
+    morse.state = msIdle;           /* nic k vysilani */
+    return;
+  }
+
+  char c = morse_buf[buf_tail];
+  buf_tail = (buf_tail + 1U) % (MORSE_BUF_SIZE + 1U);
+
+  if (c == ' ')
+  {
+    /* 3 jednotky ticha uz probehly za predchozim znakem, doplnit na 7 */
+    morse.wait  = GAP_WORD_UNITS - GAP_CHAR_UNITS;
+    morse.state = msNextChar;
+  }
+  else
+  {
+    morse.current_symbol = morse_code[(uint8_t)c];
+    morse.state = msChar;
+  }
+}
 
 /**
  * @brief  Nastavi PC0 (LED1) jako push-pull vystup (signal Morse koderu), vychozi stav 0.
@@ -129,10 +199,15 @@ void morse_init(void)
   morse.state          = msIdle;
   morse.current_symbol = 0;
   morse.wait           = 0;
+  buf_head             = 0;
+  buf_tail             = 0;
+
+  morse_puts("SOS SOS SOS SOS SOS SOS");   /* testovaci zprava, odvysila se jednou */
 }
 
 /**
- * @brief  Jeden krok koderu (volat kazdych T_DIT_MS). Vysila zpravu msg[] dokola.
+ * @brief  Jeden krok koderu (volat kazdych T_DIT_MS). Vysila znaky z bufferu,
+ *         kdyz je prazdny, ceka v msIdle (ticho).
  *         Kod znaku: LSB se vysila prvni, 1 = signal, 0 = ticho (1 jednotka).
  * @param  None.
  * @return 1 kdyz ma byt vysilan signal, 0 kdyz ticho.
@@ -144,11 +219,14 @@ uint32_t morse_task(void)
   switch (morse.state)
   {
     case msIdle:
-      /* start zpravy: nacti prvni znak */
-      idx = 0;
-      morse.current_symbol = msg[idx++];
-      morse.state = msChar;
-      break;
+      /* cekame na znak v bufferu */
+      morse_load_next();
+      if (morse.state != msChar)
+      {
+        break;
+      }
+      /* fall through: znak je pripraveny, vysilej hned */
+      /* FALLTHRU */
 
     case msChar:
       /* vezmi posledni bit, nastav vystup, posun doprava */
@@ -156,16 +234,7 @@ uint32_t morse_task(void)
       morse.current_symbol >>= 1;
       if (morse.current_symbol == 0)
       {
-        /* konec znaku -> mezera; za poslednim znakem mezera mezi slovy */
-        if (idx >= MSG_LEN)
-        {
-          idx = 0;
-          morse.wait = GAP_WORD_UNITS;
-        }
-        else
-        {
-          morse.wait = GAP_CHAR_UNITS;
-        }
+        morse.wait  = GAP_CHAR_UNITS;  /* konec znaku -> mezera mezi znaky */
         morse.state = msNextChar;
       }
       break;
@@ -174,8 +243,7 @@ uint32_t morse_task(void)
       /* odpocitej mezeru (ticho), pak nacti dalsi znak */
       if (--morse.wait == 0)
       {
-        morse.current_symbol = msg[idx++];
-        morse.state = msChar;
+        morse_load_next();
       }
       break;
   }

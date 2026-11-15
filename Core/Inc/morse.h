@@ -40,6 +40,15 @@ void morse_init(void);
   **/
 uint32_t morse_task(void);
 
+#define MORSE_BUF_SIZE 100U   /*< kapacita bufferu znaku k odvysilani */
+
+/** Vloz znak do bufferu (A-Z, a-z, mezera).
+  * \return 1 = vlozeno, 0 = plny buffer / nepodporovany znak **/
+uint32_t morse_put(char c);
+
+/** Vloz retezec do bufferu. \return pocet vlozenych znaku **/
+uint32_t morse_puts(const char *s);
+
 /** Nastav vystupy (LED1, pri morse.tone i ton bzucaku) podle vysledku morse_task() **/
 void morse_output(uint32_t on);
 
