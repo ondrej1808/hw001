@@ -34,7 +34,7 @@ int main(void)
         if (morse_run)
         {
             morse_run = false;
-            GPIOC->BSRR = morse_task() ? GPIO_BSRR_BS0 : GPIO_BSRR_BR0;   /* LED1 = PC0 */
+            morse_output(morse_task());   /* LED1 (PC0) + ton na PA11 */
         }
     }
 }

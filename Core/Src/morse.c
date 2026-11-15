@@ -9,6 +9,11 @@
 #include "morse.h"
 #include "stm32f4xx.h"
 #include "stm32f4xx_hal_gpio.h"
+#include "stm32f4xx_hal_gpio_ex.h"
+
+#define TONE_FREQ_HZ   1000U                        /* frekvence tonu bzucaku */
+#define TONE_TIM_CLK   1000000U                     /* TIM1 tick po prescaleru: 1 MHz */
+#define TONE_ARR       (TONE_TIM_CLK / TONE_FREQ_HZ) /* 1000 -> 1 kHz */
 
 const uint32_t T_DIT_MS = 120;
 
@@ -69,13 +74,56 @@ static void morse_output_init(void)
 }
 
 /**
- * @brief  Inicializuje ulohu Morse koderu: vystup PC0 (LED1), perioda = 1 dit, start v msIdle.
+ * @brief  Nastavi PA11 (BUZZER_PWM) jako TIM1_CH4 a TIM1 na PWM 1 kHz, 50 % strida.
+ *         Ton je po inicializaci vypnuty (CCR4 = 0 -> vystup trvale v 0).
  * @param  None.
- * @return Nic. Side effect: zapne hodiny GPIOC a nastavi PC0 jako vystup.
+ * @return Nic. Side effect: zapne hodiny GPIOA a TIM1.
+ * @note   Pocita s TIM1 clock = 16 MHz (HSI, APB2 bez delicky).
+ */
+static void morse_tone_init(void)
+{
+  /* PA11 -> AF1 (TIM1_CH4) */
+  RCC->AHB1ENR  |= RCC_AHB1ENR_GPIOAEN;
+  GPIOA->AFR[1] &= ~GPIO_AFRH_AFSEL11_Msk;
+  GPIOA->AFR[1] |= GPIO_AF1_TIM1 << GPIO_AFRH_AFSEL11_Pos;
+  GPIOA->MODER  &= ~GPIO_MODER_MODE11_Msk;
+  GPIOA->MODER  |= GPIO_MODE_AF_PP << GPIO_MODER_MODE11_Pos;
+
+  /* TIM1: 16 MHz / 16 = 1 MHz, ARR 1000 -> 1 kHz */
+  RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+  TIM1->PSC   = (16000000U / TONE_TIM_CLK) - 1U;
+  TIM1->ARR   = TONE_ARR - 1U;
+  TIM1->CCR4  = 0U;                                         /* ton vypnuty */
+  TIM1->CCMR2 = TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1        /* PWM mode 1 */
+              | TIM_CCMR2_OC4PE;
+  TIM1->CCER  = TIM_CCER_CC4E;
+  TIM1->BDTR  = TIM_BDTR_MOE;                               /* advanced timer: povolit vystupy */
+  TIM1->EGR   = TIM_EGR_UG;
+  TIM1->CR1   = TIM_CR1_ARPE | TIM_CR1_CEN;
+}
+
+/**
+ * @brief  Nastavi vystupy Morse koderu: LED1 (PC0) a pri morse.tone i ton na bzucaku.
+ * @param  on  != 0 = vysilat (LED sviti, ton zni), 0 = ticho.
+ * @return Nic.
+ */
+void morse_output(uint32_t on)
+{
+  GPIOC->BSRR = on ? GPIO_BSRR_BS0 : GPIO_BSRR_BR0;
+  TIM1->CCR4  = (on && morse.tone) ? (TONE_ARR / 2U) : 0U;
+}
+
+/**
+ * @brief  Inicializuje ulohu Morse koderu: LED1 (PC0), bzucak PA11 (TIM1_CH4, 1 kHz),
+ *         perioda = 1 dit, start v msIdle, rezim tonu zapnuty.
+ * @param  None.
+ * @return Nic. Side effect: zapne hodiny GPIOA, GPIOC a TIM1.
  */
 void morse_init(void)
 {
   morse_output_init();
+  morse_tone_init();
+  morse.tone           = 1;
   morse.task_period    = T_DIT_MS;
   morse.task_cnt       = 1;
   morse.state          = msIdle;
