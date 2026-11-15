@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(${PROJECT_NAME}
     Core/Src/main.c
+    Core/Src/seg7.c
     Core/Src/system_stm32f4xx.c
     Core/Src/startup_stm32f401xe.s
 )
